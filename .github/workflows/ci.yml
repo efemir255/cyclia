@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: '3.47.7'
+
+jobs:
+  test:
+    name: Analyze & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Check formatting
+        # Generated localization files are excluded.
+        run: dart format --output=none --set-exit-if-changed $(git ls-files '*.dart' | grep -v '^lib/l10n/')
+      - run: flutter analyze
+      - run: flutter test
+
+  android:
+    name: Build Android APK
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cyclia-android
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+  ios:
+    name: Build iOS app
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      # Unsigned build: proves the iOS target compiles without an Apple
+      # Developer account. Signing is only needed to install on a device.
+      - run: flutter build ios --release --no-codesign
+      - name: Package Runner.app
+        run: |
+          cd build/ios/iphoneos
+          zip -r ../../../cyclia-ios-unsigned.zip Runner.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cyclia-ios-unsigned
+          path: cyclia-ios-unsigned.zip
